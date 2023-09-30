@@ -19,32 +19,31 @@ class clientThread(threading.Thread):
         """Overriding the thread run funtion, this fuction will get the client's request and response"""
         
         while (self.live == True):
-            clientRequestStr = self.socket.recv(1024).decode()
-            logging.getLogger('secureChat').info("clientRequestStr is:\n" + clientRequestStr)
-            print("Sender with IP:", self.ip, "send you a message:\n", clientRequestStr)
+            clientStr = self.socket.recv(1024).decode()
+            logging.getLogger('secureChat').info("Receive the folling message from sender with IP:", self.ip + "\n" + clientStr)
+            print("Receive the folling message from sender with IP:", self.ip + "\n" + clientStr)
 
         self.socket.close()
         logging.getLogger('secureChat').info("Disconnected to client ..., killing thread for: " +self.ip+":"+str(self.port)) 
         return
 
-
 class inputThread(threading.Thread): 
+    """This class is use to create a input thread to receive input from terminal"""
 
     def __init__(self):
-        """Overriding the thread init funtion, added ip, port, socket parameter for this thread"""
+        """Overriding the thread init funtion, added destination's IP parameter for this thread"""
 
         threading.Thread.__init__(self)
-        self.ip = ""
+        self.destIP = ""
     
     def run(self):
         while (1):
-            if self.ip == "":
-                self.ip = input("please input your target ip")
+            if self.destIP == "":
+                self.destIP = input("please input your target receiver's IP address")
                 self.udpSock = socket(AF_INET, SOCK_STREAM)
-                self.udpSock.connect((self.ip, 12345)) # input 127.0.0.1 for localhost testing
+                self.udpSock.connect((self.destIP, 12345)) # input 127.0.0.1 for localhost testing
             else:
-                dataSend = input() + "\n"
-                print(dataSend)
+                dataSend = input("please input the message you want to send to:" + self.destIP) + "\n"
                 self.udpSock.send(dataSend.encode("utf-8"))
 
 def initLogger():
@@ -58,15 +57,15 @@ def initLogger():
                         datefmt='%H:%M:%S',
                         level=logging.DEBUG)
 
-def run(ip="", port=12345): # defalult blind to local IP and port 12345
-    """Accept the ip and port parameter and start to listen connections from client with corresponding port number.
+def run(port=12345): # defalult blind to local IP and port 12345
+    """Accept the port parameter and start to listen connections from sender with corresponding port number.
         When new connection received from client, it will create a new thread from class clientThread to handle it"""
     
     try:
         initLogger()
 
         listenerSocket = socket(AF_INET, SOCK_STREAM)
-        listenerSocket.bind((ip, port))
+        listenerSocket.bind(("", port))
         threads = []
 
 
@@ -76,8 +75,8 @@ def run(ip="", port=12345): # defalult blind to local IP and port 12345
 
  
         while True:
-            listenerSocket.listen(5) # max 5 connections
-            logging.getLogger('secureChat').info("Listening for incoming connections on port:" + str(port) + "...")
+            listenerSocket.listen(5) # max 5 incoming connections
+            logging.getLogger('secureChat').info("Listening for incoming connections on port:" + str(port) + "...\n")
             (clientsock, (clientIP, clientPort)) = listenerSocket.accept()
             newthread = clientThread(clientIP, clientPort, clientsock)
             newthread.start()
@@ -96,12 +95,10 @@ def run(ip="", port=12345): # defalult blind to local IP and port 12345
         pass
 
 if __name__ == '__main__':
-    """Main function of the program, if running in terimal, it could take one argument as server's port number"""
+    """Main function of the program, it could take one argument as server's port number"""
     from sys import argv
     
     if len(argv) == 2:
         run(port=int(argv[1]))
-    elif len(argv) == 3:
-        run(ip="", port=int(argv[1]))
     else:
         run()
