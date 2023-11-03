@@ -10,40 +10,31 @@ from cryptography.hazmat.primitives.ciphers import Cipher, modes
 from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 from cryptography.hazmat.primitives.ciphers import algorithms
 
+debugMode = False
+
 class P2PChat:
     def __init__(self, port):
         self.port = port
         self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.socket.bind(('', self.port))
         self.socket.listen(1)
-        print(f"Listening on port {self.port}")
 
-
+        # generate RSA private and public key pair
+        # self.rsa_private_key = rsa.generate_private_key( 
+        #     public_exponent=65537,
+        #     key_size=2048,
+        # )
+        # self.rsa_public_key = self.rsa_private_key.public_key()
+        # self.rsa_public_key_bytes = self.rsa_public_key.public_bytes(
+        #     encoding=serialization.Encoding.PEM,
+        #     format=serialization.PublicFormat.SubjectPublicKeyInfo
+        # )
 
         # Pre-defined DH parameters for key exchange from RFC 3526, Group 14 (2048-bit MODP Group)
         p = 0xFFFFFFFFFFFFFFFFC90FDAA22168C234C4C6628B80DC1CD129024E088A67CC74020BBEA63B139B22514A08798E3404DDEF9519B3CD3A431B302B0A6DF25F14374FE1356D6D51C245E485B576625E7EC6F44C42E9A637ED6B0BFF5CB6F406B7EDEE386BFB5A899FA5AE9F24117C4B1FE649286651ECE45B3DC2007CB8A163BF0598DA48361C55D39A69163FA8FD24CF5F83655D23DCA3AD961C62F356208552BB9ED529077096966D670C354E4ABC9804F1746C08CA18217C32905E462E36CE3BE39E772C180E86039B2783A2EC07A28FB5C55DF06F4C52C9DE2BCBF6955817183995497CEA956AE515D2261898FA051015728E5A8AACAA68FFFFFFFFFFFFFFFF
         g = 2
         parameters_numbers = dh.DHParameterNumbers(p, g)
         self.dh_parameters = parameters_numbers.parameters(default_backend())
-
-        # RSA key pair for digital signature and identity verification
-        self.rsa_private_key = rsa.generate_private_key(
-            public_exponent=65537,
-            key_size=2048,
-        )
-        self.rsa_public_key = self.rsa_private_key.public_key()
-
-    def generate_keys(self):
-        self.private_key = rsa.generate_private_key(
-            public_exponent=65537,
-            key_size=2048
-        )
-        self.public_key = self.private_key.public_key()
-
-        self.public_key_bytes = self.public_key.public_bytes(
-            encoding=serialization.Encoding.PEM,
-            format=serialization.PublicFormat.SubjectPublicKeyInfo
-        )
 
     def dh_key_exchange(self, client_socket):
         # Generate private and public keys for DH key exchange
@@ -56,19 +47,14 @@ class P2PChat:
             format=serialization.PublicFormat.SubjectPublicKeyInfo
         )
 
-        # Debugging.....
-        # print("Sending Public Key:", public_key_bytes)
-
-
-        # Send our public key
+        # Send public key
         client_socket.sendall(public_key_bytes)
+        if debugMode: print("Sending Public Key:", public_key_bytes)
 
         # Receive peer's public key
         peer_public_key_bytes = client_socket.recv(1024)
         peer_public_key = serialization.load_pem_public_key(peer_public_key_bytes)
-
-        # Debugging....
-        # print("Received Peer Public Key:", peer_public_key_bytes)
+        if debugMode: print("Received Peer Public Key:", peer_public_key_bytes)
 
         # Generate shared key
         shared_key = private_key.exchange(peer_public_key)
@@ -82,13 +68,12 @@ class P2PChat:
             backend=default_backend()
         ).derive(shared_key)
 
-        # Debugging....
-        print(f"derived_key: {self.derived_key}")
+        if debugMode: print(f"derived_key: {self.derived_key}")
 
     def encrypt_message(self, message):
-        # Generate random initialization vector
-        iv = os.urandom(16)
-        cipher = Cipher(algorithms.AES(self.derived_key), modes.CFB(iv), backend=default_backend())
+        # Generate random IV
+        iv = os.urandom(16) # os.urandom suitable for cryptographic use
+        cipher = Cipher(algorithms.AES(self.derived_key), modes.CFB(iv), backend=default_backend()) #CFB mode more secure
         encryptor = cipher.encryptor()
         ciphertext = encryptor.update(message.encode()) + encryptor.finalize()
         return iv + ciphertext
@@ -103,11 +88,6 @@ class P2PChat:
         h = hmac.HMAC(self.derived_key, hashes.SHA256(), backend=default_backend())
         h.update(message)
         return h.finalize()
-
-    def connect_to_peer(self, peer_host, peer_port):
-        self.peer_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        self.peer_socket.connect((peer_host, peer_port))
-        self.dh_key_exchange(self.peer_socket)
 
     def verify_hmac(self, message, received_hmac):
         h = hmac.HMAC(self.derived_key, hashes.SHA256(), backend=default_backend())
@@ -134,20 +114,17 @@ class P2PChat:
             try:
                 received_data = client_socket.recv(1024 + 1 + 32)  # message + split + hmac
 
-                print(f"\nReceived message (including hmac): {received_data}")
+                print(f"Received message (including hmac): {received_data}")
                 encrypted_message, received_hmac = received_data.rsplit(b'|', 1)
-                print(f"\nReceived message (message only): {encrypted_message}")
-                print(f"\nReceived messgae (hmac only): {received_hmac}")
-
-                # Debugging....
-                # print(f"Received HMAC: {received_hmac.hex()}")
+                print(f"Received message (message only): {encrypted_message}")
+                print(f"Received messgae (hmac only): {received_hmac}")
 
                 if self.verify_hmac(encrypted_message, received_hmac):
                     decrypted_message = self.decrypt_message(encrypted_message)
-                    print(f"\nReceived (Encrypted): {encrypted_message}")
-                    print(f"\nReceived: {decrypted_message}")
+                    print(f"Received (Encrypted): {encrypted_message}")
+                    print(f"Received: {decrypted_message}")
                 else:
-                    print("\nVerification failed.")
+                    print("hmac Verification failed.")
 
             except Exception as e:
                 print(f"\nSome problems occurred: {e}")
@@ -156,10 +133,7 @@ class P2PChat:
         client_socket.close()
 
     def send_message(self, message):
-        # 對訊息進行對稱加密
         encrypted_message = self.encrypt_message(message)
-
-        # 為加密後的訊息生成 HMAC
         message_hmac = self.generate_hmac(encrypted_message)
 
         # Debugging...
@@ -169,22 +143,6 @@ class P2PChat:
         self.peer_socket.sendall(encrypted_message + b'|' + message_hmac)
         return None
 
-    # def receive_message(self, encrypted_message):
-    #     encrypted_message = self.peer_socket.recv(1024)
-    #     received_hmac = self.peer_socket.recv(32)
-    #     # Debugging....
-    #     print(f"Received HMAC: {received_hmac.hex()}")
-    #
-    #     # HMAC Verification
-    #     try:
-    #         self.verify_hmac(encrypted_message, received_hmac)
-    #         # HMAC Verification OK
-    #         decrypted_message = self.decrypt_message(encrypted_message)
-    #         return decrypted_message
-    #     except InvalidSignature:
-    #         # HMAC Verification failed, message could be modified
-    #         return None
-
     def run(self):
         while True:
             command = input("Enter command (send, exit): ")
@@ -192,12 +150,16 @@ class P2PChat:
                 message = input("Enter message: ").strip()
                 self.send_message(message)
             elif command == "exit":
-                print("Exiting...")
                 self.socket.close()  # Close the listening socket
                 if hasattr(self, 'peer_socket'):
                     self.peer_socket.close()  # Close the peer socket if it exists
                 print("Program terminated.")
                 exit(0)
+
+    def connect_to_peer(self, peer_host, peer_port):
+        self.peer_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.peer_socket.connect((peer_host, peer_port))
+        self.dh_key_exchange(self.peer_socket)
 
 if __name__ == "__main__":
     port = int(input("Enter your server port: ").strip())
