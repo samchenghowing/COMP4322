@@ -133,6 +133,7 @@ class P2PChat:
         client_socket.close()
 
     def send_message(self, message):
+        # add nonce here #
         encrypted_message = self.encrypt_message(message)
         message_hmac = self.generate_hmac(encrypted_message)
 
