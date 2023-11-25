@@ -36,6 +36,10 @@ class P2PChat:
         parameters_numbers = dh.DHParameterNumbers(p, g)
         self.dh_parameters = parameters_numbers.parameters(default_backend())
 
+        # Used for preventing replay attack
+        self.num_of_send = 0
+        self.num_of_receive = 0
+
     def dh_key_exchange(self, client_socket):
         # Generate private and public keys for DH key exchange
         private_key = self.dh_parameters.generate_private_key()
@@ -68,14 +72,17 @@ class P2PChat:
             backend=default_backend()
         ).derive(shared_key)
 
-        if debugMode: print(f"derived_key: {self.derived_key}")
+        if debugMode: print(f"Derived Key: {self.derived_key}")
 
     def encrypt_message(self, message):
         # Generate random IV
-        iv = os.urandom(16) # os.urandom suitable for cryptographic use
-        cipher = Cipher(algorithms.AES(self.derived_key), modes.CFB(iv), backend=default_backend()) #CFB mode more secure
+        iv = os.urandom(16)
+        # CFB mode more secure
+        cipher = Cipher(algorithms.AES(self.derived_key), modes.CFB(iv),
+                        backend=default_backend())
         encryptor = cipher.encryptor()
         ciphertext = encryptor.update(message.encode()) + encryptor.finalize()
+        # Concat iv and ciphertext as one single message
         return iv + ciphertext
 
     def decrypt_message(self, ciphertext):
@@ -109,22 +116,34 @@ class P2PChat:
 
     def handle_client(self, client_socket):
         self.dh_key_exchange(client_socket)
-        
+
         while True:
             try:
-                received_data = client_socket.recv(1024 + 1 + 32)  # message + split + hmac
+                received_data = client_socket.recv(2048)
 
-                print(f"Received message (including hmac): {received_data}")
-                encrypted_message, received_hmac = received_data.rsplit(b'|', 1)
-                print(f"Received message (message only): {encrypted_message}")
-                print(f"Received messgae (hmac only): {received_hmac}")
+                # Split the whole message into different parts
+                encrypted_message, received_hmac, received_count = received_data.rsplit(b'||', 2)
+
+                if debugMode:
+                    print(f"\nReceived message (message only): {encrypted_message}")
+                    print(f"Received messgae (hmac only): {received_hmac}")
+                    print(f"Received messgae (received_count only): {received_count}")
+                    print(f"Received message (entire): {received_data}")
+
+                # received_count = int(received_count.decode())
+                received_count = int(self.decrypt_message(received_count))
+
+                if received_count != self.num_of_receive:
+                    # num_of_receive not increased, as the message is not reliable
+                    print("Warning: Possible replay attack detected")
+                else:
+                    self.num_of_receive += 1
 
                 if self.verify_hmac(encrypted_message, received_hmac):
                     decrypted_message = self.decrypt_message(encrypted_message)
-                    print(f"Received (Encrypted): {encrypted_message}")
                     print(f"Received: {decrypted_message}")
                 else:
-                    print("hmac Verification failed.")
+                    print("HMAC Verification failed.")
 
             except Exception as e:
                 print(f"\nSome problems occurred: {e}")
@@ -133,15 +152,17 @@ class P2PChat:
         client_socket.close()
 
     def send_message(self, message):
-        # add nonce here #
         encrypted_message = self.encrypt_message(message)
         message_hmac = self.generate_hmac(encrypted_message)
+        send_count = self.encrypt_message(str(self.num_of_send))
 
-        # Debugging...
-        print(f"Sent message (mesaage only): {encrypted_message}")
-        print(f"Sent message (hmac only:) {message_hmac}")
-        print(f"Sent message (including hmac): {encrypted_message + b'|' + message_hmac}")
-        self.peer_socket.sendall(encrypted_message + b'|' + message_hmac)
+        if debugMode:
+            print(f"Sent message (mesaage only): {encrypted_message}")
+            print(f"Sent message (hmac only:) {message_hmac}")
+            print(f"Sent message (send_count only): {send_count}")
+            print(f"Sent message (entire): {encrypted_message + b'||' + message_hmac + b'||' + send_count}")
+        self.peer_socket.sendall(encrypted_message + b'||' + message_hmac + b'||' + send_count)
+        self.num_of_send += 1
         return None
 
     def run(self):
@@ -161,6 +182,7 @@ class P2PChat:
         self.peer_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.peer_socket.connect((peer_host, peer_port))
         self.dh_key_exchange(self.peer_socket)
+
 
 if __name__ == "__main__":
     port = int(input("Enter your server port: ").strip())
