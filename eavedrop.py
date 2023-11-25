@@ -1,10 +1,11 @@
 from scapy.all import *
+from scapy.layers.inet import TCP
 
 def packet_callback(packet):
-    # Process the captured packet here
-    # You can access packet fields and perform actions based on your requirements
-    # For example, you can check if the packet has a specific source or destination port
-    if packet.haslayer(TCP) and (packet[TCP].sport == "127.0.0.1" or packet[TCP].dport == 12345):
+    if packet.haslayer(TCP):
         print(packet.summary())
+        print(packet.show())
         
-sniff(filter="tcp", prn=packet_callback)
+if __name__ == "__main__":
+    pkts = sniff(filter="port 12345", prn=packet_callback, count=20)
+    wrpcap('eavedrop.pcap', pkts)
